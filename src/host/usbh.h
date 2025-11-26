@@ -110,6 +110,43 @@ typedef union {
 } tuh_configure_param_t;
 
 //--------------------------------------------------------------------+
+// INSTANCE HANDLE API (Multi-Controller Support)
+//--------------------------------------------------------------------+
+
+// Forward declare the internal structure
+struct usbh_instance;
+
+// Opaque instance handle for multi-controller support
+typedef struct usbh_instance* tuh_instance_t;
+
+// Initialize a USB host instance on a specific root hub port
+tuh_instance_t tuh_instance_init(uint8_t rhport, const tusb_rhport_init_t* rh_init);
+
+// Deinitialize a USB host instance
+bool tuh_instance_deinit(tuh_instance_t inst);
+
+// Get default instance (first initialized instance, for backward compatibility)
+tuh_instance_t tuh_get_default_instance(void);
+
+// Get instance by root hub port number
+tuh_instance_t tuh_get_instance(uint8_t rhport);
+
+// Check if instance is initialized
+bool tuh_instance_inited(tuh_instance_t inst);
+
+// Task function for a specific instance
+void tuh_task_instance(tuh_instance_t inst);
+
+// Process all initialized instances
+void tuh_task_all(void);
+
+// Check if instance has pending events
+bool tuh_instance_task_event_ready(tuh_instance_t inst);
+
+// Check if device is mounted on an instance
+bool tuh_instance_mounted(tuh_instance_t inst, uint8_t daddr);
+
+//--------------------------------------------------------------------+
 // APPLICATION CALLBACK
 //--------------------------------------------------------------------+
 

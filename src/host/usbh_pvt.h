@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2021, Ha Thach (tinyusb.org)
+ * Copyright (c) 2024 Ha Thach (tinyusb.org)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,75 +27,100 @@
 #ifndef TUSB_USBH_PVT_H_
 #define TUSB_USBH_PVT_H_
 
+#include "usbh.h"
+#include "hcd.h"
 #include "osal/osal.h"
-#include "common/tusb_fifo.h"
-#include "common/tusb_private.h"
 
 #ifdef __cplusplus
  extern "C" {
 #endif
 
-#define TU_LOG_USBH(...)      TU_LOG(CFG_TUH_LOG_LEVEL, __VA_ARGS__)
-#define TU_LOG_MEM_USBH(...)  TU_LOG_MEM(CFG_TUH_LOG_LEVEL, __VA_ARGS__)
-#define TU_LOG_BUF_USBH(...)  TU_LOG_BUF(CFG_TUH_LOG_LEVEL, __VA_ARGS__)
-#define TU_LOG_INT_USBH(...)  TU_LOG_INT(CFG_TUH_LOG_LEVEL, __VA_ARGS__)
-#define TU_LOG_HEX_USBH(...)  TU_LOG_HEX(CFG_TUH_LOG_LEVEL, __VA_ARGS__)
-
 //--------------------------------------------------------------------+
-// Class Driver API
+// Instance Structure Definition
 //--------------------------------------------------------------------+
 
+#define TOTAL_DEVICES (CFG_TUH_DEVICE_MAX + CFG_TUH_HUB)
+
+// Device structure
 typedef struct {
-  char const* name;
-  bool (* const init       )(void);
-  bool (* const deinit     )(void);
-  bool (* const open       )(uint8_t rhport, uint8_t dev_addr, tusb_desc_interface_t const * itf_desc, uint16_t max_len);
-  bool (* const set_config )(uint8_t dev_addr, uint8_t itf_num);
-  bool (* const xfer_cb    )(uint8_t dev_addr, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes);
-  void (* const close      )(uint8_t dev_addr);
-} usbh_class_driver_t;
+  uint8_t rhport;
+  uint8_t hub_addr;
+  uint8_t hub_port;
+  uint8_t speed;
 
-// Invoked when initializing host stack to get additional class drivers.
-// Can be implemented by application to extend/overwrite class driver support.
-// Note: The drivers array must be accessible at all time when stack is active
-usbh_class_driver_t const* usbh_app_driver_get_cb(uint8_t* driver_count);
+  uint16_t bcdUSB;
+  uint8_t bDeviceClass;
+  uint8_t bDeviceSubClass;
+  uint8_t bDeviceProtocol;
+  uint8_t bMaxPacketSize0;
+  uint16_t idVendor;
+  uint16_t idProduct;
+  uint16_t bcdDevice;
+  uint8_t iManufacturer;
+  uint8_t iProduct;
+  uint8_t iSerialNumber;
+  uint8_t bNumConfigurations;
 
-// Call by class driver to tell USBH that it has complete the enumeration
-void usbh_driver_set_config_complete(uint8_t dev_addr, uint8_t itf_num);
+  volatile uint8_t state;
+  uint8_t itf_count;
+  uint8_t ep_count;
 
-uint8_t usbh_get_rhport(uint8_t daddr);
+  uint8_t itf2drv[CFG_TUH_INTERFACE_MAX];
+  uint8_t ep2drv[CFG_TUH_ENDPOINT_MAX][2];
 
-uint8_t* usbh_get_enum_buf(void);
+  struct TU_ATTR_PACKED {
+    volatile bool connected : 1;
+    volatile bool configured : 1;
+    volatile bool suspended : 1;
+  };
+} usbh_device_t;
 
-void usbh_int_set(bool enabled);
+// Control transfer info
+typedef struct {
+  uint8_t* buffer;
+  tuh_xfer_cb_t complete_cb;
+  uintptr_t user_data;
 
-void usbh_defer_func(osal_task_func_t func, void *param, bool in_isr);
+  volatile uint8_t stage;
+  uint8_t daddr;
+  volatile uint16_t actual_len;
+  uint8_t failed_count;
+} usbh_ctrl_xfer_info_t;
 
-void usbh_spin_lock(bool in_isr);
-void usbh_spin_unlock(bool in_isr);
+// Enumeration buffer
+typedef struct {
+  TUH_EPBUF_TYPE_DEF(tusb_control_request_t, request);
+  TUH_EPBUF_DEF(ctrl, CFG_TUH_ENUMERATION_BUFSIZE);
+} usbh_epbuf_t;
 
-//--------------------------------------------------------------------+
-// USBH Endpoint API
-//--------------------------------------------------------------------+
+// USB Host Instance Structure
+struct usbh_instance {
+  uint8_t rhport;
+  uint8_t controller_id;
+  uint8_t enumerating_daddr;
+  uint8_t attach_debouncing_bm;
+  tuh_bus_info_t dev0_bus;
+  usbh_ctrl_xfer_info_t ctrl_xfer;
 
-// Submit a usb transfer with callback support, require CFG_TUH_API_EDPT_XFER
-bool usbh_edpt_xfer_with_callback(uint8_t dev_addr, uint8_t ep_addr, uint8_t * buffer, uint16_t total_bytes,
-                                  tuh_xfer_cb_t complete_cb, uintptr_t user_data);
+  OSAL_QUEUE_DEF(event_queue_def, CFG_TUH_TASK_QUEUE_SZ, hcd_event_t);
+  osal_queue_t event_queue;
 
-TU_ATTR_ALWAYS_INLINE static inline
-bool usbh_edpt_xfer(uint8_t dev_addr, uint8_t ep_addr, uint8_t * buffer, uint16_t total_bytes) {
-  return usbh_edpt_xfer_with_callback(dev_addr, ep_addr, buffer, total_bytes, NULL, 0);
-}
+#if OSAL_MUTEX_REQUIRED
+  osal_mutex_def_t mutex_def;
+  osal_mutex_t mutex;
+#endif
 
-// Claim an endpoint before submitting a transfer.
-// If caller does not make any transfer, it must release endpoint for others.
-bool usbh_edpt_claim(uint8_t dev_addr, uint8_t ep_addr);
+  OSAL_SPINLOCK_DEF(spin_def, usbh_int_set);
+  osal_spinlock_t spin;
 
-// Release claimed endpoint without submitting a transfer
-bool usbh_edpt_release(uint8_t dev_addr, uint8_t ep_addr);
+  usbh_device_t devices[TOTAL_DEVICES];
+  CFG_TUH_MEM_SECTION CFG_TUH_MEM_ALIGN usbh_epbuf_t epbuf;
 
-// Check if endpoint transferring is complete
-bool usbh_edpt_busy(uint8_t dev_addr, uint8_t ep_addr);
+  bool initialized;
+  bool running;
+};
+
+typedef struct usbh_instance usbh_instance_t;
 
 #ifdef __cplusplus
  }

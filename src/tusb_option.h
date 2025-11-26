@@ -577,6 +577,29 @@
 // Host Options (Default)
 //--------------------------------------------------------------------
 #if CFG_TUH_ENABLED
+  // Maximum number of USB root hub ports (controllers) that can operate simultaneously as hosts
+  // - ESP32-P4 has 2 (Full-Speed and High-Speed)
+  // - Most MCUs have 1
+  #ifndef CFG_TUH_MAX_RHPORT
+    #if TU_CHECK_MCU(OPT_MCU_ESP32P4)
+      #define CFG_TUH_MAX_RHPORT 2
+    #else
+      #define CFG_TUH_MAX_RHPORT 1
+    #endif
+  #endif
+
+  // Enable multi-instance (dual host) support
+  // When disabled, code size is reduced by eliminating per-instance overhead
+  #ifndef CFG_TUH_MULTI_INSTANCE
+    #define CFG_TUH_MULTI_INSTANCE (CFG_TUH_MAX_RHPORT > 1)
+  #endif
+
+  // Enable backward compatible API (single instance via macros)
+  // Recommended for existing applications
+  #ifndef CFG_TUH_BACKWARD_COMPATIBLE_API
+    #define CFG_TUH_BACKWARD_COMPATIBLE_API 1
+  #endif
+
   #ifndef CFG_TUH_DEVICE_MAX
     #define CFG_TUH_DEVICE_MAX 1
   #endif
