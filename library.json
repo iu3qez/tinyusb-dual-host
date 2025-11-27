@@ -19,5 +19,9 @@
     "license": "MIT",
     "homepage": "https://www.tinyusb.org/",
     "frameworks": "*",
-    "platforms": "*"
+    "platforms": "*",
+    "build": {
+      "flags": ["-I src"],
+      "srcFilter": ["-<*>"]
+    }
 }
