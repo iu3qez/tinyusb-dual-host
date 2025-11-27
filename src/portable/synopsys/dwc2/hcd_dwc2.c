@@ -251,7 +251,7 @@ TU_ATTR_ALWAYS_INLINE static inline uint8_t channel_find_enabled(dwc2_regs_t* dw
   const uint8_t rhport = dwc2_get_rhport(dwc2);
   const uint8_t max_channel = dwc2_channel_count(dwc2);
   for (uint8_t ch_id = 0; ch_id < max_channel; ch_id++) {
-    if (HCD_DATA(rhport)->xfer[ch_id].allocated) {
+    if (HCD_DATA(rhport).xfer[ch_id].allocated) {
       const dwc2_channel_char_t hcchar = {.value = dwc2->channel[ch_id].hcchar};
       if (hcchar.dev_addr == dev_addr && hcchar.ep_num == ep_num && (ep_num == 0 || hcchar.ep_dir == ep_dir)) {
         return ch_id;
@@ -425,7 +425,7 @@ bool hcd_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
   (void) rh_init;
   dwc2_regs_t* dwc2 = DWC2_REG(rhport);
 
-  tu_memclr(HCD_DATA(rhport), sizeof(hcd_data_t));
+  tu_memclr(&HCD_DATA(rhport), sizeof(hcd_data_t));
 
   // Core Initialization
   const bool is_highspeed = dwc2_core_is_highspeed(dwc2, TUSB_ROLE_HOST);
