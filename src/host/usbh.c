@@ -1680,10 +1680,8 @@ static void enum_full_complete(usbh_instance_t* inst);
 static void process_enumeration(tuh_xfer_t* xfer);
 
 // Forward declaration for usbh_edpt_xfer_with_callback (defined later, used in tuh_edpt_xfer)
-#if CFG_TUH_API_EDPT_XFER
 bool usbh_edpt_xfer_with_callback(uint8_t dev_addr, uint8_t ep_addr, uint8_t* buffer, uint16_t total_bytes,
                                   tuh_xfer_cb_t complete_cb, uintptr_t user_data);
-#endif
 
 // start a new enumeration process
 static bool enum_new_device(hcd_event_t* event) {
