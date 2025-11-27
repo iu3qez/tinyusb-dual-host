@@ -1229,11 +1229,23 @@ void usbh_int_set(bool enabled) {
 }
 
 void usbh_spin_lock(bool in_isr) {
-  osal_spin_lock(&_usbh_spin, in_isr);
+  // Lock spinlocks for all active host controllers
+  for (uint8_t rhport = 0; rhport < CFG_TUH_MAX_RHPORT; rhport++) {
+    usbh_instance_t* inst = &_usbh_instances[rhport];
+    if (inst->initialized && inst->spin) {
+      osal_spin_lock(inst->spin, in_isr);
+    }
+  }
 }
 
 void usbh_spin_unlock(bool in_isr) {
-  osal_spin_unlock(&_usbh_spin, in_isr);
+  // Unlock spinlocks for all active host controllers (in reverse order)
+  for (int8_t rhport = CFG_TUH_MAX_RHPORT - 1; rhport >= 0; rhport--) {
+    usbh_instance_t* inst = &_usbh_instances[rhport];
+    if (inst->initialized && inst->spin) {
+      osal_spin_unlock(inst->spin, in_isr);
+    }
+  }
 }
 
 void usbh_defer_func(osal_task_func_t func, void *param, bool in_isr) {
