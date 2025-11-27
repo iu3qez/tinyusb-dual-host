@@ -54,6 +54,10 @@ typedef struct {
   uint8_t iso_retry; // ISO retry counter
 } xfer_ctl_t;
 
+#ifndef CFG_TUD_MAX_RHPORT
+  #define CFG_TUD_MAX_RHPORT 2
+#endif
+
 // This variable is modified from ISR context, so it must be protected by critical section
 static xfer_ctl_t xfer_status[CFG_TUD_MAX_RHPORT][DWC2_EP_MAX][2];
 #define XFER_CTL_BASE(_rhport, _ep, _dir) (&xfer_status[_rhport][_ep][_dir])
