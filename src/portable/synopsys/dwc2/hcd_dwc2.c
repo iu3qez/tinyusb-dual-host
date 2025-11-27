@@ -119,7 +119,7 @@ typedef struct {
 static hcd_data_t _hcd_data[CFG_TUH_MAX_RHPORT];
 
 // Helper macro to get HCD data for a specific rhport
-#define HCD_DATA(rhport) (HCD_DATA(rhport)[(rhport)])
+#define HCD_DATA(rhport) (_hcd_data[(rhport)])
 
 //--------------------------------------------------------------------
 //
