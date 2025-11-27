@@ -121,6 +121,16 @@ static hcd_data_t _hcd_data[CFG_TUH_MAX_RHPORT];
 // Helper macro to get HCD data for a specific rhport
 #define HCD_DATA(rhport) (_hcd_data[(rhport)])
 
+// Helper function to get rhport from dwc2 pointer
+TU_ATTR_ALWAYS_INLINE static inline uint8_t dwc2_get_rhport(const dwc2_regs_t* dwc2) {
+  for (uint8_t rhport = 0; rhport < CFG_TUH_MAX_RHPORT; rhport++) {
+    if ((uintptr_t)dwc2 == _dwc2_controller[rhport].reg_base) {
+      return rhport;
+    }
+  }
+  return 0; // fallback to rhport 0
+}
+
 //--------------------------------------------------------------------
 //
 //--------------------------------------------------------------------
@@ -170,9 +180,10 @@ bool hcd_dcache_clean_invalidate(const void* addr, uint32_t data_size) {
 
 // Allocate a channel for new transfer
 TU_ATTR_ALWAYS_INLINE static inline uint8_t channel_alloc(dwc2_regs_t* dwc2) {
+  const uint8_t rhport = dwc2_get_rhport(dwc2);
   const uint8_t max_channel = dwc2_channel_count(dwc2);
   for (uint8_t ch_id = 0; ch_id < max_channel; ch_id++) {
-    hcd_xfer_t* xfer = HCD_DATA(rhport).xfer[ch_id];
+    hcd_xfer_t* xfer = &&HCD_DATA(rhport).xfer[ch_id];
     if (!xfer->allocated) {
       tu_memclr(xfer, sizeof(hcd_xfer_t));
       xfer->allocated = true;
@@ -199,7 +210,8 @@ TU_ATTR_ALWAYS_INLINE static inline uint8_t req_queue_avail(const dwc2_regs_t* d
 }
 
 TU_ATTR_ALWAYS_INLINE static inline void channel_dealloc(dwc2_regs_t* dwc2, uint8_t ch_id) {
-  hcd_xfer_t* xfer = HCD_DATA(rhport).xfer[ch_id];
+  const uint8_t rhport = dwc2_get_rhport(dwc2);
+  hcd_xfer_t* xfer = &HCD_DATA(rhport).xfer[ch_id];
   xfer->allocated = false;
   dwc2->haintmsk &= ~TU_BIT(ch_id);
 }
@@ -236,6 +248,7 @@ TU_ATTR_ALWAYS_INLINE static inline bool channel_send_in_token(const dwc2_regs_t
 
 // Find currently enabled channel. Note: EP0 is bidirectional
 TU_ATTR_ALWAYS_INLINE static inline uint8_t channel_find_enabled(dwc2_regs_t* dwc2, uint8_t dev_addr, uint8_t ep_num, uint8_t ep_dir) {
+  const uint8_t rhport = dwc2_get_rhport(dwc2);
   const uint8_t max_channel = dwc2_channel_count(dwc2);
   for (uint8_t ch_id = 0; ch_id < max_channel; ch_id++) {
     if (HCD_DATA(rhport)->xfer[ch_id].allocated) {
@@ -250,9 +263,9 @@ TU_ATTR_ALWAYS_INLINE static inline uint8_t channel_find_enabled(dwc2_regs_t* dw
 
 
 // Allocate a new endpoint
-TU_ATTR_ALWAYS_INLINE static inline uint8_t edpt_alloc(void) {
+TU_ATTR_ALWAYS_INLINE static inline uint8_t edpt_alloc(uint8_t rhport) {
   for (uint32_t i = 0; i < CFG_TUH_DWC2_ENDPOINT_MAX; i++) {
-    hcd_endpoint_t* edpt = HCD_DATA(rhport).edpt[i];
+    hcd_endpoint_t* edpt = &HCD_DATA(rhport).edpt[i];
     if (edpt->hcchar_bm.enable == 0) {
       tu_memclr(edpt, sizeof(hcd_endpoint_t));
       edpt->hcchar_bm.enable = 1;
@@ -268,12 +281,13 @@ TU_ATTR_ALWAYS_INLINE static inline void edpt_dealloc(hcd_endpoint_t *edpt) {
 
 // close an opened endpoint
 static void edpt_close(dwc2_regs_t *dwc2, uint8_t ep_id) {
-  hcd_endpoint_t *edpt = HCD_DATA(rhport).edpt[ep_id];
+  const uint8_t rhport = dwc2_get_rhport(dwc2);
+  hcd_endpoint_t *edpt = &HCD_DATA(rhport).edpt[ep_id];
   edpt->closing        = 1; // mark endpoint as closing
 
   // disable active channel belong to this endpoint
   for (uint8_t ch_id = 0; ch_id < DWC2_CHANNEL_COUNT_MAX; ch_id++) {
-    hcd_xfer_t *xfer = HCD_DATA(rhport).xfer[ch_id];
+    hcd_xfer_t *xfer = &HCD_DATA(rhport).xfer[ch_id];
     if (xfer->allocated && xfer->ep_id == ep_id) {
       dwc2_channel_t *channel = &dwc2->channel[ch_id];
       xfer->closing           = 1;
@@ -287,9 +301,9 @@ static void edpt_close(dwc2_regs_t *dwc2, uint8_t ep_id) {
 
 // Find an endpoint that is opened previously with hcd_edpt_open()
 // Note: EP0 is bidirectional
-TU_ATTR_ALWAYS_INLINE static inline uint8_t edpt_find_opened(uint8_t dev_addr, uint8_t ep_num, uint8_t ep_dir) {
+TU_ATTR_ALWAYS_INLINE static inline uint8_t edpt_find_opened(uint8_t rhport, uint8_t dev_addr, uint8_t ep_num, uint8_t ep_dir) {
   for (uint8_t i = 0; i < (uint8_t)CFG_TUH_DWC2_ENDPOINT_MAX; i++) {
-    const hcd_endpoint_t     *edpt      = HCD_DATA(rhport).edpt[i];
+    const hcd_endpoint_t     *edpt      = &HCD_DATA(rhport).edpt[i];
     const dwc2_channel_char_t hcchar_bm = edpt->hcchar_bm;
     if (hcchar_bm.enable && hcchar_bm.dev_addr == dev_addr && hcchar_bm.ep_num == ep_num &&
         (ep_num == 0 || hcchar_bm.ep_dir == ep_dir)) {
@@ -507,7 +521,7 @@ tusb_speed_t hcd_port_speed_get(uint8_t rhport) {
 void hcd_device_close(uint8_t rhport, uint8_t dev_addr) {
   dwc2_regs_t* dwc2 = DWC2_REG(rhport);
   for (uint8_t ep_id = 0; ep_id < CFG_TUH_DWC2_ENDPOINT_MAX; ep_id++) {
-    const hcd_endpoint_t *edpt = HCD_DATA(rhport).edpt[ep_id];
+    const hcd_endpoint_t *edpt = &HCD_DATA(rhport).edpt[ep_id];
     if (edpt->hcchar_bm.enable && edpt->hcchar_bm.dev_addr == dev_addr) {
       edpt_close(dwc2, ep_id);
     }
@@ -527,9 +541,9 @@ bool hcd_edpt_open(uint8_t rhport, uint8_t dev_addr, const tusb_desc_endpoint_t*
   tuh_bus_info_get(dev_addr, &bus_info);
 
   // find a free endpoint
-  const uint8_t ep_id = edpt_alloc();
+  const uint8_t ep_id = edpt_alloc(rhport);
   TU_ASSERT(ep_id < CFG_TUH_DWC2_ENDPOINT_MAX);
-  hcd_endpoint_t* edpt = HCD_DATA(rhport).edpt[ep_id];
+  hcd_endpoint_t* edpt = &HCD_DATA(rhport).edpt[ep_id];
 
   dwc2_channel_char_t* hcchar_bm = &edpt->hcchar_bm;
   hcchar_bm->ep_size         = tu_edpt_packet_size(desc_ep);
@@ -589,9 +603,10 @@ bool hcd_edpt_close(uint8_t rhport, uint8_t daddr, uint8_t ep_addr) {
 
 // clean up channel after part of transfer is done but the whole urb is not complete
 static void channel_xfer_out_wrapup(dwc2_regs_t* dwc2, uint8_t ch_id) {
-  hcd_xfer_t* xfer = HCD_DATA(rhport).xfer[ch_id];
+  const uint8_t rhport = dwc2_get_rhport(dwc2);
+  hcd_xfer_t* xfer = &HCD_DATA(rhport).xfer[ch_id];
   const dwc2_channel_t* channel = &dwc2->channel[ch_id];
-  hcd_endpoint_t* edpt = HCD_DATA(rhport).edpt[xfer->ep_id];
+  hcd_endpoint_t* edpt = &HCD_DATA(rhport).edpt[xfer->ep_id];
 
   const dwc2_channel_tsize_t hctsiz = {.value = channel->hctsiz};
   edpt->next_pid = hctsiz.pid; // save PID
@@ -614,8 +629,9 @@ static void channel_xfer_out_wrapup(dwc2_regs_t* dwc2, uint8_t ch_id) {
 }
 
 static bool channel_xfer_start(dwc2_regs_t* dwc2, uint8_t ch_id) {
-  hcd_xfer_t* xfer = HCD_DATA(rhport).xfer[ch_id];
-  hcd_endpoint_t* edpt = HCD_DATA(rhport).edpt[xfer->ep_id];
+  const uint8_t rhport = dwc2_get_rhport(dwc2);
+  hcd_xfer_t* xfer = &HCD_DATA(rhport).xfer[ch_id];
+  hcd_endpoint_t* edpt = &HCD_DATA(rhport).edpt[xfer->ep_id];
   dwc2_channel_char_t* hcchar_bm = &edpt->hcchar_bm;
   dwc2_channel_t* channel = &dwc2->channel[ch_id];
   bool const is_period = channel_is_periodic(edpt->hcchar);
@@ -699,9 +715,10 @@ static bool channel_xfer_start(dwc2_regs_t* dwc2, uint8_t ch_id) {
 
 // kick-off transfer with an endpoint
 static bool edpt_xfer_kickoff(dwc2_regs_t* dwc2, uint8_t ep_id) {
+  const uint8_t rhport = dwc2_get_rhport(dwc2);
   uint8_t ch_id = channel_alloc(dwc2);
   TU_ASSERT(ch_id < 16); // all channel are in used
-  hcd_xfer_t* xfer = HCD_DATA(rhport).xfer[ch_id];
+  hcd_xfer_t* xfer = &HCD_DATA(rhport).xfer[ch_id];
   xfer->ep_id = ep_id;
   xfer->result = XFER_RESULT_INVALID;
 
@@ -715,7 +732,7 @@ bool hcd_edpt_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr, uint8_t * 
 
   uint8_t ep_id = edpt_find_opened(dev_addr, ep_num, ep_dir);
   TU_ASSERT(ep_id < CFG_TUH_DWC2_ENDPOINT_MAX);
-  hcd_endpoint_t *edpt = HCD_DATA(rhport).edpt[ep_id];
+  hcd_endpoint_t *edpt = &HCD_DATA(rhport).edpt[ep_id];
   TU_VERIFY(edpt->closing == 0); // skip if endpoint is closing
 
   edpt->buffer = buffer;
@@ -756,7 +773,7 @@ bool hcd_edpt_abort_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr) {
 bool hcd_setup_send(uint8_t rhport, uint8_t dev_addr, const uint8_t setup_packet[8]) {
   uint8_t ep_id = edpt_find_opened(dev_addr, 0, TUSB_DIR_OUT);
   TU_ASSERT(ep_id < CFG_TUH_DWC2_ENDPOINT_MAX); // no opened endpoint
-  hcd_endpoint_t* edpt = HCD_DATA(rhport).edpt[ep_id];
+  hcd_endpoint_t* edpt = &HCD_DATA(rhport).edpt[ep_id];
   edpt->next_pid = HCTSIZ_PID_SETUP;
 
   return hcd_edpt_xfer(rhport, dev_addr, 0, (uint8_t*)(uintptr_t) setup_packet, 8);
@@ -769,7 +786,7 @@ bool hcd_edpt_clear_stall(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr) {
   const uint8_t ep_dir = tu_edpt_dir(ep_addr);
   const uint8_t ep_id = edpt_find_opened(dev_addr, ep_num, ep_dir);
   TU_VERIFY(ep_id < CFG_TUH_DWC2_ENDPOINT_MAX);
-  hcd_endpoint_t* edpt = HCD_DATA(rhport).edpt[ep_id];
+  hcd_endpoint_t* edpt = &HCD_DATA(rhport).edpt[ep_id];
 
   edpt->next_pid = HCTSIZ_PID_DATA0;
 
@@ -782,8 +799,9 @@ bool hcd_edpt_clear_stall(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr) {
 
 // retry an IN transfer, channel must be halted
 static void channel_xfer_in_retry(dwc2_regs_t* dwc2, uint8_t ch_id, uint32_t hcint) {
-  hcd_xfer_t* xfer = HCD_DATA(rhport).xfer[ch_id];
-  hcd_endpoint_t* edpt = HCD_DATA(rhport).edpt[xfer->ep_id];
+  const uint8_t rhport = dwc2_get_rhport(dwc2);
+  hcd_xfer_t* xfer = &HCD_DATA(rhport).xfer[ch_id];
+  hcd_endpoint_t* edpt = &HCD_DATA(rhport).edpt[xfer->ep_id];
   dwc2_channel_t* channel = &dwc2->channel[ch_id];
   dwc2_channel_char_t hcchar = {.value = channel->hcchar};
 
@@ -859,9 +877,9 @@ static void handle_rxflvl_irq(uint8_t rhport) {
     case GRXSTS_PKTSTS_RX_DATA: {
       // In packet received, pop this entry --> ACK interrupt
       const uint16_t byte_count = grxstsp.byte_count;
-      hcd_xfer_t* xfer = HCD_DATA(rhport).xfer[ch_id];
+      hcd_xfer_t* xfer = &HCD_DATA(rhport).xfer[ch_id];
       TU_ASSERT(xfer->ep_id < CFG_TUH_DWC2_ENDPOINT_MAX,);
-      hcd_endpoint_t* edpt = HCD_DATA(rhport).edpt[xfer->ep_id];
+      hcd_endpoint_t* edpt = &HCD_DATA(rhport).edpt[xfer->ep_id];
 
       if (byte_count > 0) {
         dfifo_read_packet(dwc2, edpt->buffer + xfer->xferred_bytes, byte_count);
@@ -891,6 +909,7 @@ static void handle_rxflvl_irq(uint8_t rhport) {
 
 // return true if there is still pending data and need more ISR
 static bool handle_txfifo_empty(dwc2_regs_t* dwc2, bool is_periodic) {
+  const uint8_t rhport = dwc2_get_rhport(dwc2);
   // Use period txsts for both p/np to get request queue space available (1-bit difference, it is small enough)
   const dwc2_hptxsts_t txsts = {.value = (is_periodic ? dwc2->hptxsts : dwc2->hnptxsts)};
 
@@ -900,9 +919,9 @@ static bool handle_txfifo_empty(dwc2_regs_t* dwc2, bool is_periodic) {
     const dwc2_channel_char_t hcchar = {.value = channel->hcchar};
     // skip writing to FIFO if channel is expecting halted.
     if (0 == (channel->hcintmsk & HCINT_HALTED) && (hcchar.ep_dir == TUSB_DIR_OUT)) {
-      hcd_xfer_t *xfer = HCD_DATA(rhport).xfer[ch_id];
+      hcd_xfer_t *xfer = &HCD_DATA(rhport).xfer[ch_id];
       TU_ASSERT(xfer->ep_id < CFG_TUH_DWC2_ENDPOINT_MAX);
-      hcd_endpoint_t* edpt = HCD_DATA(rhport).edpt[xfer->ep_id];
+      hcd_endpoint_t* edpt = &HCD_DATA(rhport).edpt[xfer->ep_id];
       const dwc2_channel_tsize_t hctsiz = {.value = channel->hctsiz};
       const uint16_t remain_packets = hctsiz.packet_count;
       for (uint16_t i = 0; i < remain_packets; i++) {
@@ -925,9 +944,10 @@ static bool handle_txfifo_empty(dwc2_regs_t* dwc2, bool is_periodic) {
 }
 
 static bool handle_channel_in_slave(dwc2_regs_t* dwc2, uint8_t ch_id, uint32_t hcint) {
-  hcd_xfer_t* xfer = HCD_DATA(rhport).xfer[ch_id];
+  const uint8_t rhport = dwc2_get_rhport(dwc2);
+  hcd_xfer_t* xfer = &HCD_DATA(rhport).xfer[ch_id];
   dwc2_channel_t* channel = &dwc2->channel[ch_id];
-  hcd_endpoint_t* edpt = HCD_DATA(rhport).edpt[xfer->ep_id];
+  hcd_endpoint_t* edpt = &HCD_DATA(rhport).edpt[xfer->ep_id];
   dwc2_channel_split_t hcsplt = {.value = channel->hcsplt};
   const dwc2_channel_tsize_t hctsiz = {.value = channel->hctsiz};
   bool is_done = false;
@@ -1026,9 +1046,10 @@ static bool handle_channel_in_slave(dwc2_regs_t* dwc2, uint8_t ch_id, uint32_t h
 }
 
 static bool handle_channel_out_slave(dwc2_regs_t* dwc2, uint8_t ch_id, uint32_t hcint) {
-  hcd_xfer_t* xfer = HCD_DATA(rhport).xfer[ch_id];
+  const uint8_t rhport = dwc2_get_rhport(dwc2);
+  hcd_xfer_t* xfer = &HCD_DATA(rhport).xfer[ch_id];
   dwc2_channel_t* channel = &dwc2->channel[ch_id];
-  hcd_endpoint_t* edpt = HCD_DATA(rhport).edpt[xfer->ep_id];
+  hcd_endpoint_t* edpt = &HCD_DATA(rhport).edpt[xfer->ep_id];
   dwc2_channel_split_t hcsplt = {.value = channel->hcsplt};
   bool is_done = false;
 
@@ -1111,9 +1132,9 @@ static bool handle_channel_out_slave(dwc2_regs_t* dwc2, uint8_t ch_id, uint32_t 
 
 #if CFG_TUH_DWC2_DMA_ENABLE
 static bool handle_channel_in_dma(dwc2_regs_t* dwc2, uint8_t ch_id, uint32_t hcint) {
-  hcd_xfer_t* xfer = HCD_DATA(rhport).xfer[ch_id];
+  hcd_xfer_t* xfer = &HCD_DATA(rhport).xfer[ch_id];
   dwc2_channel_t* channel = &dwc2->channel[ch_id];
-  hcd_endpoint_t* edpt = HCD_DATA(rhport).edpt[xfer->ep_id];
+  hcd_endpoint_t* edpt = &HCD_DATA(rhport).edpt[xfer->ep_id];
   dwc2_channel_char_t hcchar = {.value = channel->hcchar};
   dwc2_channel_split_t hcsplt = {.value = channel->hcsplt};
   const dwc2_channel_tsize_t hctsiz = {.value = channel->hctsiz};
@@ -1204,9 +1225,9 @@ static bool handle_channel_in_dma(dwc2_regs_t* dwc2, uint8_t ch_id, uint32_t hci
 }
 
 static bool handle_channel_out_dma(dwc2_regs_t* dwc2, uint8_t ch_id, uint32_t hcint) {
-  hcd_xfer_t* xfer = HCD_DATA(rhport).xfer[ch_id];
+  hcd_xfer_t* xfer = &HCD_DATA(rhport).xfer[ch_id];
   dwc2_channel_t* channel = &dwc2->channel[ch_id];
-  hcd_endpoint_t* edpt = HCD_DATA(rhport).edpt[xfer->ep_id];
+  hcd_endpoint_t* edpt = &HCD_DATA(rhport).edpt[xfer->ep_id];
   dwc2_channel_split_t hcsplt = {.value = channel->hcsplt};
 
   bool is_done = false;
@@ -1279,7 +1300,7 @@ static void handle_channel_irq(uint8_t rhport, bool in_isr) {
   for (uint8_t ch_id = 0; ch_id < max_channel; ch_id++) {
     if (tu_bit_test(dwc2->haint, ch_id)) {
       dwc2_channel_t* channel = &dwc2->channel[ch_id];
-      hcd_xfer_t* xfer = HCD_DATA(rhport).xfer[ch_id];
+      hcd_xfer_t* xfer = &HCD_DATA(rhport).xfer[ch_id];
       TU_ASSERT(xfer->ep_id < CFG_TUH_DWC2_ENDPOINT_MAX,);
       dwc2_channel_char_t hcchar = {.value = channel->hcchar};
 
@@ -1311,7 +1332,7 @@ static void handle_channel_irq(uint8_t rhport, bool in_isr) {
 
       if (is_done) {
         if (xfer->closing == 1) {
-          hcd_endpoint_t *edpt = HCD_DATA(rhport).edpt[xfer->ep_id];
+          hcd_endpoint_t *edpt = &HCD_DATA(rhport).edpt[xfer->ep_id];
           edpt_dealloc(edpt);
         } else {
           const uint8_t ep_addr = tu_edpt_addr(hcchar.ep_num, hcchar.ep_dir);
@@ -1335,7 +1356,7 @@ static bool handle_sof_irq(uint8_t rhport, bool in_isr) {
   const uint32_t ucount = (hprt_speed_get(dwc2) == TUSB_SPEED_HIGH ? 1 : 8);
 
   for(uint8_t ep_id = 0; ep_id < CFG_TUH_DWC2_ENDPOINT_MAX; ep_id++) {
-    hcd_endpoint_t *edpt = HCD_DATA(rhport).edpt[ep_id];
+    hcd_endpoint_t *edpt = &HCD_DATA(rhport).edpt[ep_id];
     if (edpt->closing == 0) {
       if (edpt->hcchar_bm.enable && channel_is_periodic(edpt->hcchar) && edpt->uframe_countdown > 0) {
         edpt->uframe_countdown -= tu_min32(ucount, edpt->uframe_countdown);
