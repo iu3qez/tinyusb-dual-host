@@ -107,6 +107,11 @@ typedef struct {
     uintptr_t user_data;
   } ep_callback[CFG_TUH_ENDPOINT_MAX][2];
 #endif
+
+TU_ATTR_ALWAYS_INLINE static inline
+bool usbh_edpt_xfer(uint8_t dev_addr, uint8_t ep_addr, uint8_t * buffer, uint16_t total_bytes) {
+  return usbh_edpt_xfer_with_callback(dev_addr, ep_addr, buffer, total_bytes, NULL, 0);
+}
 } usbh_device_t;
 
 // Control transfer info
@@ -184,7 +189,11 @@ bool usbh_edpt_xfer_with_callback(uint8_t dev_addr, uint8_t ep_addr, uint8_t * b
                                   tuh_xfer_cb_t complete_cb, uintptr_t user_data);
 #endif
 
-bool usbh_edpt_xfer(uint8_t dev_addr, uint8_t ep_addr, uint8_t * buffer, uint16_t total_bytes);
+TU_ATTR_ALWAYS_INLINE static inline
+bool usbh_edpt_xfer(uint8_t dev_addr, uint8_t ep_addr, uint8_t * buffer, uint16_t total_bytes) {
+  return usbh_edpt_xfer_with_callback(dev_addr, ep_addr, buffer, total_bytes, NULL, 0);
+}
+
 bool usbh_edpt_claim(uint8_t dev_addr, uint8_t ep_addr);
 bool usbh_edpt_release(uint8_t dev_addr, uint8_t ep_addr);
 bool usbh_edpt_busy(uint8_t dev_addr, uint8_t ep_addr);
