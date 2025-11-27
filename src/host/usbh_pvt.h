@@ -180,10 +180,8 @@ void usbh_defer_func(osal_task_func_t func, void *param, bool in_isr);
 void usbh_driver_set_config_complete(uint8_t dev_addr, uint8_t itf_num);
 
 // Endpoint transfer functions
-#if CFG_TUH_API_EDPT_XFER
 bool usbh_edpt_xfer_with_callback(uint8_t dev_addr, uint8_t ep_addr, uint8_t * buffer, uint16_t total_bytes,
                                   tuh_xfer_cb_t complete_cb, uintptr_t user_data);
-#endif
 
 TU_ATTR_ALWAYS_INLINE static inline
 bool usbh_edpt_xfer(uint8_t dev_addr, uint8_t ep_addr, uint8_t * buffer, uint16_t total_bytes) {
