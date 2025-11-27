@@ -66,6 +66,12 @@ extern "C" {
 // Buffer for enumeration and descriptor reading
 #define CFG_TUH_ENUMERATION_BUFSIZE 512
 
+// Task queue size for USB host events
+#define CFG_TUH_TASK_QUEUE_SZ 16
+
+// Maximum number of interfaces per device
+#define CFG_TUH_INTERFACE_MAX 8
+
 // Maximum number of USB hubs supported
 #define CFG_TUH_HUB 1
 
@@ -74,45 +80,20 @@ extern "C" {
 #define CFG_TUH_DEVICE_MAX (4 * CFG_TUH_HUB + 1)
 
 //--------------------------------------------------------------------
-// USB Host Class Drivers - Enable ALL available classes
+// USB Host Class Drivers
+// ESPHome uses ESP-IDF's USB class drivers (esp-usb), not TinyUSB's
+// Disable all TinyUSB class drivers to avoid conflicts
 //--------------------------------------------------------------------
 
-//------------- Mass Storage (USB drives, card readers) -------------//
-#define CFG_TUH_MSC 1
-#define CFG_TUH_MSC_MAXLUN 4  // Max LUNs per device (typical for card readers)
-
-//------------- HID (keyboards, mice, game controllers) -------------//
-#define CFG_TUH_HID (3 * CFG_TUH_DEVICE_MAX)  // Allow multiple HID interfaces per device
-#define CFG_TUH_HID_EPIN_BUFSIZE 64
-#define CFG_TUH_HID_EPOUT_BUFSIZE 64
-
-//------------- CDC (serial devices) -------------//
-#define CFG_TUH_CDC 2  // Number of CDC ACM devices
-
-// CDC buffer sizes
-#define CFG_TUH_CDC_RX_BUFSIZE 256
-#define CFG_TUH_CDC_TX_BUFSIZE 256
-
-// CDC line control on enumeration: DTR + RTS
-#define CFG_TUH_CDC_LINE_CONTROL_ON_ENUM (CDC_CONTROL_LINE_STATE_DTR | CDC_CONTROL_LINE_STATE_RTS)
-
-// CDC line coding: 115200 baud, 8N1
-#define CFG_TUH_CDC_LINE_CODING_ON_ENUM \
-  { 115200, CDC_LINE_CODING_STOP_BITS_1, CDC_LINE_CODING_PARITY_NONE, 8 }
-
-//------------- CDC Serial Adapters (FTDI, CP210x, CH34x, PL2303) -------------//
-#define CFG_TUH_CDC_FTDI 1    // FTDI FT232, FT2232, etc.
-#define CFG_TUH_CDC_CP210X 1  // SiLabs CP2102, CP2104, etc.
-#define CFG_TUH_CDC_CH34X 1   // WCH CH340, CH341
-#define CFG_TUH_CDC_PL2303 1  // Prolific PL2303
-
-//------------- MIDI -------------//
-#define CFG_TUH_MIDI 1
-#define CFG_TUH_MIDI_RX_BUFSIZE 128
-#define CFG_TUH_MIDI_TX_BUFSIZE 128
-
-//------------- Vendor-specific devices -------------//
-#define CFG_TUH_VENDOR 1
+#define CFG_TUH_MSC 0        // Use esp-usb MSC driver instead
+#define CFG_TUH_HID 0        // Use esp-usb HID driver instead
+#define CFG_TUH_CDC 0        // Use esp-usb CDC driver instead
+#define CFG_TUH_CDC_FTDI 0   // Use esp-usb CDC driver instead
+#define CFG_TUH_CDC_CP210X 0 // Use esp-usb CDC driver instead
+#define CFG_TUH_CDC_CH34X 0  // Use esp-usb CDC driver instead
+#define CFG_TUH_CDC_PL2303 0 // Use esp-usb CDC driver instead
+#define CFG_TUH_MIDI 0       // Use esp-usb MIDI driver instead
+#define CFG_TUH_VENDOR 0     // Use esp-usb vendor driver instead
 
 #ifdef __cplusplus
 }
