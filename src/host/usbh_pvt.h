@@ -102,16 +102,15 @@ struct usbh_instance {
   tuh_bus_info_t dev0_bus;
   usbh_ctrl_xfer_info_t ctrl_xfer;
 
-  OSAL_QUEUE_DEF(event_queue_def, CFG_TUH_TASK_QUEUE_SZ, hcd_event_t);
+  // Event queue and spinlock are defined at file scope (not embedded in struct)
+  // Instance stores only pointers/references to them
   osal_queue_t event_queue;
+  osal_spinlock_t spin;
 
 #if OSAL_MUTEX_REQUIRED
   osal_mutex_def_t mutex_def;
   osal_mutex_t mutex;
 #endif
-
-  OSAL_SPINLOCK_DEF(spin_def, usbh_int_set);
-  osal_spinlock_t spin;
 
   usbh_device_t devices[TOTAL_DEVICES];
   CFG_TUH_MEM_SECTION CFG_TUH_MEM_ALIGN usbh_epbuf_t epbuf;

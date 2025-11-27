@@ -169,6 +169,46 @@ static osal_mutex_t _global_mutex = NULL;
 static bool _any_instance_init = false;
 
 //--------------------------------------------------------------------+
+// Per-Instance OSAL Resources (Queue and Spinlock)
+// These must be defined at file scope because OSAL macros create
+// buffers and cannot be embedded in structs
+//--------------------------------------------------------------------+
+
+// Interrupt control functions for each rhport
+static void usbh_int_set_0(bool enabled) {
+  if (enabled) {
+    hcd_int_enable(0);
+  } else {
+    hcd_int_disable(0);
+  }
+}
+
+// Event queue and spinlock for rhport 0
+OSAL_QUEUE_DEF(usbh_int_set_0, _usbh_qdef_0, CFG_TUH_TASK_QUEUE_SZ, hcd_event_t);
+static osal_queue_t _usbh_q_0 = NULL;
+
+OSAL_SPINLOCK_DEF(_usbh_spin_0, usbh_int_set_0);
+static osal_spinlock_t _usbh_spinlock_0 = &_usbh_spin_0;
+
+#if CFG_TUH_MAX_RHPORT >= 2
+// Interrupt control function for rhport 1
+static void usbh_int_set_1(bool enabled) {
+  if (enabled) {
+    hcd_int_enable(1);
+  } else {
+    hcd_int_disable(1);
+  }
+}
+
+// Event queue and spinlock for rhport 1
+OSAL_QUEUE_DEF(usbh_int_set_1, _usbh_qdef_1, CFG_TUH_TASK_QUEUE_SZ, hcd_event_t);
+static osal_queue_t _usbh_q_1 = NULL;
+
+OSAL_SPINLOCK_DEF(_usbh_spin_1, usbh_int_set_1);
+static osal_spinlock_t _usbh_spinlock_1 = &_usbh_spin_1;
+#endif
+
+//--------------------------------------------------------------------+
 // Class Driver
 //--------------------------------------------------------------------+
 #if CFG_TUSB_DEBUG >= CFG_TUH_LOG_LEVEL
@@ -533,18 +573,40 @@ tuh_instance_t tuh_instance_init(uint8_t rhport, const tusb_rhport_init_t* rh_in
   inst->controller_id = rhport;
   inst->enumerating_daddr = TUSB_INDEX_INVALID_8;
 
-  // Create event queue for this instance
-  inst->event_queue = osal_queue_create(&inst->event_queue_def);
-  TU_VERIFY(inst->event_queue != NULL, NULL);
+  // Assign pre-created event queue and spinlock based on rhport
+  if (rhport == 0) {
+    // Initialize queue for rhport 0 (first time only)
+    if (_usbh_q_0 == NULL) {
+      _usbh_q_0 = osal_queue_create(&_usbh_qdef_0);
+      TU_VERIFY(_usbh_q_0 != NULL, NULL);
+    }
+    inst->event_queue = _usbh_q_0;
+    inst->spin = _usbh_spinlock_0;
+  }
+#if CFG_TUH_MAX_RHPORT >= 2
+  else if (rhport == 1) {
+    // Initialize queue for rhport 1 (first time only)
+    if (_usbh_q_1 == NULL) {
+      _usbh_q_1 = osal_queue_create(&_usbh_qdef_1);
+      TU_VERIFY(_usbh_q_1 != NULL, NULL);
+    }
+    inst->event_queue = _usbh_q_1;
+    inst->spin = _usbh_spinlock_1;
+  }
+#endif
+  else {
+    TU_LOG_USBH("Invalid rhport %u (max %u)\r\n", rhport, CFG_TUH_MAX_RHPORT);
+    return NULL;
+  }
+
+  // Initialize spinlock
+  osal_spin_init(inst->spin);
 
 #if OSAL_MUTEX_REQUIRED
   // Create per-instance mutex
   inst->mutex = osal_mutex_create(&inst->mutex_def);
   TU_VERIFY(inst->mutex != NULL, NULL);
 #endif
-
-  // Initialize spinlock
-  osal_spin_init(&inst->spin);
 
   // Initialize device array for this instance
   for (uint8_t i = 0; i < TOTAL_DEVICES; i++) {
