@@ -557,8 +557,8 @@ tuh_instance_t tuh_instance_init(uint8_t rhport, const tusb_rhport_init_t* rh_in
     return NULL;
   }
 
-  // Initialize spinlock
-  osal_spin_init(&inst->spin);
+  // Initialize spinlock (spin is already a pointer, don't take address)
+  osal_spin_init(inst->spin);
 
 #if OSAL_MUTEX_REQUIRED
   // Create per-instance mutex
@@ -1191,7 +1191,7 @@ void usbh_spin_lock(bool in_isr) {
   for (uint8_t rhport = 0; rhport < CFG_TUH_MAX_RHPORT; rhport++) {
     usbh_instance_t* inst = &_usbh_instances[rhport];
     if (inst->initialized && inst->spin != NULL) {
-      osal_spin_lock(&inst->spin, in_isr);
+      osal_spin_lock(inst->spin, in_isr);
     }
   }
 }
@@ -1201,7 +1201,7 @@ void usbh_spin_unlock(bool in_isr) {
   for (int8_t rhport = CFG_TUH_MAX_RHPORT - 1; rhport >= 0; rhport--) {
     usbh_instance_t* inst = &_usbh_instances[rhport];
     if (inst->initialized && inst->spin != NULL) {
-      osal_spin_unlock(&inst->spin, in_isr);
+      osal_spin_unlock(inst->spin, in_isr);
     }
   }
 }
