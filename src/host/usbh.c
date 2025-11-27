@@ -104,50 +104,8 @@ TU_ATTR_WEAK void tuh_umount_cb(uint8_t daddr) {
 //--------------------------------------------------------------------+
 // Data Structure
 //--------------------------------------------------------------------+
-typedef struct {
-  tuh_bus_info_t bus_info;
-
-  // Device Descriptor
-  uint16_t bcdUSB;
-  uint8_t  bDeviceClass;
-  uint8_t  bDeviceSubClass;
-  uint8_t  bDeviceProtocol;
-  uint8_t  bMaxPacketSize0;
-  uint16_t idVendor;
-  uint16_t idProduct;
-  uint16_t bcdDevice;
-  uint8_t  iManufacturer;
-  uint8_t  iProduct;
-  uint8_t  iSerialNumber;
-  uint8_t  bNumConfigurations;
-
-  // Device State
-  struct TU_ATTR_PACKED {
-    volatile uint8_t connected  : 1; // After 1st transfer
-    volatile uint8_t addressed  : 1; // After SET_ADDR
-    volatile uint8_t configured : 1; // After SET_CONFIG and all drivers are configured
-    volatile uint8_t suspended  : 1; // Bus suspended
-    // volatile uint8_t removing : 1; // Physically disconnected, waiting to be processed by usbh
-  };
-
-  // Endpoint & Interface
-  uint8_t itf2drv[CFG_TUH_INTERFACE_MAX];  // map interface number to driver (0xff is invalid)
-  uint8_t ep2drv[CFG_TUH_ENDPOINT_MAX][2]; // map endpoint to driver ( 0xff is invalid ), can use only 4-bit each
-
-  tu_edpt_state_t ep_status[CFG_TUH_ENDPOINT_MAX][2];
-
-#if CFG_TUH_API_EDPT_XFER
-  // TODO array can be CFG_TUH_ENDPOINT_MAX-1
-  struct {
-    tuh_xfer_cb_t complete_cb;
-    uintptr_t user_data;
-  }ep_callback[CFG_TUH_ENDPOINT_MAX][2];
-#endif
-
-} usbh_device_t;
 
 // sum of end device + hub
-#define TOTAL_DEVICES   (CFG_TUH_DEVICE_MAX + CFG_TUH_HUB)
 
 //--------------------------------------------------------------------+
 // INSTANCE STORAGE
@@ -188,7 +146,7 @@ OSAL_QUEUE_DEF(usbh_int_set_0, _usbh_qdef_0, CFG_TUH_TASK_QUEUE_SZ, hcd_event_t)
 static osal_queue_t _usbh_q_0 = NULL;
 
 OSAL_SPINLOCK_DEF(_usbh_spin_0, usbh_int_set_0);
-static osal_spinlock_t _usbh_spinlock_0 = &_usbh_spin_0;
+static osal_spinlock_t* _usbh_spinlock_0 = &_usbh_spin_0;
 
 #if CFG_TUH_MAX_RHPORT >= 2
 // Interrupt control function for rhport 1
@@ -205,7 +163,7 @@ OSAL_QUEUE_DEF(usbh_int_set_1, _usbh_qdef_1, CFG_TUH_TASK_QUEUE_SZ, hcd_event_t)
 static osal_queue_t _usbh_q_1 = NULL;
 
 OSAL_SPINLOCK_DEF(_usbh_spin_1, usbh_int_set_1);
-static osal_spinlock_t _usbh_spinlock_1 = &_usbh_spin_1;
+static osal_spinlock_t* _usbh_spinlock_1 = &_usbh_spin_1;
 #endif
 
 //--------------------------------------------------------------------+
@@ -600,7 +558,7 @@ tuh_instance_t tuh_instance_init(uint8_t rhport, const tusb_rhport_init_t* rh_in
   }
 
   // Initialize spinlock
-  osal_spin_init(inst->spin);
+  osal_spin_init(&inst->spin);
 
 #if OSAL_MUTEX_REQUIRED
   // Create per-instance mutex
@@ -1232,8 +1190,8 @@ void usbh_spin_lock(bool in_isr) {
   // Lock spinlocks for all active host controllers
   for (uint8_t rhport = 0; rhport < CFG_TUH_MAX_RHPORT; rhport++) {
     usbh_instance_t* inst = &_usbh_instances[rhport];
-    if (inst->initialized && inst->spin) {
-      osal_spin_lock(inst->spin, in_isr);
+    if (inst->initialized && inst->spin != NULL) {
+      osal_spin_lock(&inst->spin, in_isr);
     }
   }
 }
@@ -1242,8 +1200,8 @@ void usbh_spin_unlock(bool in_isr) {
   // Unlock spinlocks for all active host controllers (in reverse order)
   for (int8_t rhport = CFG_TUH_MAX_RHPORT - 1; rhport >= 0; rhport--) {
     usbh_instance_t* inst = &_usbh_instances[rhport];
-    if (inst->initialized && inst->spin) {
-      osal_spin_unlock(inst->spin, in_isr);
+    if (inst->initialized && inst->spin != NULL) {
+      osal_spin_unlock(&inst->spin, in_isr);
     }
   }
 }
@@ -1828,7 +1786,7 @@ static void process_enumeration(tuh_xfer_t* xfer) {
 
       if (0 == port_status.status.connection) {
         TU_LOG_USBH("Device unplugged from hub while debouncing\r\n");
-        enum_full_complete();
+        enum_full_complete(inst);
         return;
       }
 
@@ -1865,7 +1823,7 @@ static void process_enumeration(tuh_xfer_t* xfer) {
 
       if (0 == port_status.status.connection) {
         TU_LOG_USBH("Device unplugged from hub (not addressed yet)\r\n");
-        enum_full_complete();
+        enum_full_complete(inst);
         return;
       }
 
@@ -2225,7 +2183,7 @@ void usbh_driver_set_config_complete(uint8_t dev_addr, uint8_t itf_num) {
 
   // all interface are configured
   if (itf_num == CFG_TUH_INTERFACE_MAX) {
-    enum_full_complete();
+    enum_full_complete(inst);
 
     if (is_hub_addr(dev_addr)) {
       TU_LOG_USBH("HUB address = %u is mounted\r\n", dev_addr);

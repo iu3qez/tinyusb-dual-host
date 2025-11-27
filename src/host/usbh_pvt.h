@@ -142,7 +142,7 @@ struct usbh_instance {
   // Event queue and spinlock are defined at file scope (not embedded in struct)
   // Instance stores only pointers/references to them
   osal_queue_t event_queue;
-  osal_spinlock_t spin;
+  osal_spinlock_t* spin;
 
 #if OSAL_MUTEX_REQUIRED
   osal_mutex_def_t mutex_def;
