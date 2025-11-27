@@ -1679,6 +1679,12 @@ static bool enum_parse_configuration_desc (uint8_t dev_addr, tusb_desc_configura
 static void enum_full_complete(usbh_instance_t* inst);
 static void process_enumeration(tuh_xfer_t* xfer);
 
+// Forward declaration for usbh_edpt_xfer_with_callback (defined later, used in tuh_edpt_xfer)
+#if CFG_TUH_API_EDPT_XFER
+bool usbh_edpt_xfer_with_callback(uint8_t dev_addr, uint8_t ep_addr, uint8_t* buffer, uint16_t total_bytes,
+                                  tuh_xfer_cb_t complete_cb, uintptr_t user_data);
+#endif
+
 // start a new enumeration process
 static bool enum_new_device(hcd_event_t* event) {
   // Get instance for this rhport
@@ -2167,6 +2173,8 @@ static bool enum_parse_configuration_desc(uint8_t dev_addr, tusb_desc_configurat
 
 void usbh_driver_set_config_complete(uint8_t dev_addr, uint8_t itf_num) {
   usbh_device_t* dev = get_device(dev_addr);
+  usbh_instance_t* inst = get_instance_from_daddr(dev_addr);
+  TU_VERIFY(inst != NULL, );
 
   for(itf_num++; itf_num < CFG_TUH_INTERFACE_MAX; itf_num++) {
     // continue with next valid interface

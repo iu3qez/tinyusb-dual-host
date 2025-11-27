@@ -69,10 +69,7 @@ usbh_class_driver_t const* usbh_app_driver_get_cb(uint8_t* driver_count);
 
 // Device structure
 typedef struct {
-  uint8_t rhport;
-  uint8_t hub_addr;
-  uint8_t hub_port;
-  uint8_t speed;
+  tuh_bus_info_t bus_info;  // Bus information (rhport, hub_addr, hub_port, speed)
 
   // Device Descriptor
   uint16_t bcdUSB;
