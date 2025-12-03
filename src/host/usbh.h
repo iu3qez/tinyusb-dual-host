@@ -137,6 +137,9 @@ bool tuh_instance_inited(tuh_instance_t inst);
 // Task function for a specific instance
 void tuh_task_instance(tuh_instance_t inst);
 
+// Extended task function with timeout and ISR flag
+void tuh_task_instance_ext(tuh_instance_t inst, uint32_t timeout_ms, bool in_isr);
+
 // Process all initialized instances
 void tuh_task_all(void);
 
