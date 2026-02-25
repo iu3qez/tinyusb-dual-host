@@ -49,19 +49,8 @@ enum {
   EDPT_CTRL_IN = 0x80
 };
 
-typedef struct {
-  tusb_control_request_t request;
-  uint8_t* buffer;
-  uint16_t data_len;
-  uint16_t total_xferred;
-  usbd_control_xfer_cb_t complete_cb;
-} usbd_control_xfer_t;
-
-static usbd_control_xfer_t _ctrl_xfer;
-
-CFG_TUD_MEM_SECTION static struct {
-  TUD_EPBUF_DEF(buf, CFG_TUD_ENDPOINT0_BUFSIZE);
-} _ctrl_epbuf;
+// Control transfer state and endpoint buffer are now per-instance in usbd_instance_t
+// (usbd_control_xfer_t and ctrl_epbuf defined in usbd_pvt.h)
 
 //--------------------------------------------------------------------+
 // Application API
@@ -76,41 +65,47 @@ static inline bool status_stage_xact(uint8_t rhport, const tusb_control_request_
 
 // Status phase
 bool tud_control_status(uint8_t rhport, const tusb_control_request_t* request) {
-  _ctrl_xfer.request = (*request);
-  _ctrl_xfer.buffer = NULL;
-  _ctrl_xfer.total_xferred = 0;
-  _ctrl_xfer.data_len = 0;
+  usbd_instance_t* inst = usbd_get_instance(rhport);
+  TU_ASSERT(inst);
+
+  inst->ctrl_xfer.request = (*request);
+  inst->ctrl_xfer.buffer = NULL;
+  inst->ctrl_xfer.total_xferred = 0;
+  inst->ctrl_xfer.data_len = 0;
 
   return status_stage_xact(rhport, request);
 }
 
 // Queue a transaction in Data Stage
-// Each transaction has up to Endpoint0's max packet size.
-// This function can also transfer an zero-length packet
 static bool data_stage_xact(uint8_t rhport) {
-  const uint16_t xact_len = tu_min16(_ctrl_xfer.data_len - _ctrl_xfer.total_xferred, CFG_TUD_ENDPOINT0_BUFSIZE);
+  usbd_instance_t* inst = usbd_get_instance(rhport);
+  TU_ASSERT(inst);
+
+  const uint16_t xact_len = tu_min16(inst->ctrl_xfer.data_len - inst->ctrl_xfer.total_xferred, CFG_TUD_ENDPOINT0_BUFSIZE);
   uint8_t ep_addr = EDPT_CTRL_OUT;
 
-  if (_ctrl_xfer.request.bmRequestType_bit.direction == TUSB_DIR_IN) {
+  if (inst->ctrl_xfer.request.bmRequestType_bit.direction == TUSB_DIR_IN) {
     ep_addr = EDPT_CTRL_IN;
     if (0u != xact_len) {
-      TU_VERIFY(0 == tu_memcpy_s(_ctrl_epbuf.buf, CFG_TUD_ENDPOINT0_BUFSIZE, _ctrl_xfer.buffer, xact_len));
+      TU_VERIFY(0 == tu_memcpy_s(inst->ctrl_epbuf.buf, CFG_TUD_ENDPOINT0_BUFSIZE, inst->ctrl_xfer.buffer, xact_len));
     }
   }
 
-  return usbd_edpt_xfer(rhport, ep_addr, xact_len ? _ctrl_epbuf.buf : NULL, xact_len, false);
+  return usbd_edpt_xfer(rhport, ep_addr, xact_len ? inst->ctrl_epbuf.buf : NULL, xact_len, false);
 }
 
 // Transmit data to/from the control endpoint.
-// If the request's wLength is zero, a status packet is sent instead.
 bool tud_control_xfer(uint8_t rhport, const tusb_control_request_t* request, void* buffer, uint16_t len) {
-  _ctrl_xfer.request = (*request);
-  _ctrl_xfer.buffer = (uint8_t*) buffer;
-  _ctrl_xfer.total_xferred = 0U;
-  _ctrl_xfer.data_len = tu_min16(len, request->wLength);
+  usbd_instance_t* inst = usbd_get_instance(rhport);
+  TU_ASSERT(inst);
+
+  inst->ctrl_xfer.request = (*request);
+  inst->ctrl_xfer.buffer = (uint8_t*) buffer;
+  inst->ctrl_xfer.total_xferred = 0U;
+  inst->ctrl_xfer.data_len = tu_min16(len, request->wLength);
 
   if (request->wLength > 0U) {
-    if (_ctrl_xfer.data_len > 0U) {
+    if (inst->ctrl_xfer.data_len > 0U) {
       TU_ASSERT(buffer);
     }
     TU_ASSERT(data_stage_xact(rhport));
@@ -122,28 +117,37 @@ bool tud_control_xfer(uint8_t rhport, const tusb_control_request_t* request, voi
 }
 
 //--------------------------------------------------------------------+
-// USBD API
+// USBD API (called from usbd.c)
 //--------------------------------------------------------------------+
-void usbd_control_reset(void);
-void usbd_control_set_request(const tusb_control_request_t* request);
-void usbd_control_set_complete_callback(usbd_control_xfer_cb_t fp);
+void usbd_control_reset(uint8_t rhport);
+void usbd_control_set_request(uint8_t rhport, const tusb_control_request_t* request);
+void usbd_control_set_complete_callback(uint8_t rhport, usbd_control_xfer_cb_t fp);
 bool usbd_control_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes);
 
-void usbd_control_reset(void) {
-  tu_varclr(&_ctrl_xfer);
+void usbd_control_reset(uint8_t rhport) {
+  usbd_instance_t* inst = usbd_get_instance(rhport);
+  if (inst) {
+    tu_varclr(&inst->ctrl_xfer);
+  }
 }
 
 // Set complete callback
-void usbd_control_set_complete_callback(usbd_control_xfer_cb_t fp) {
-  _ctrl_xfer.complete_cb = fp;
+void usbd_control_set_complete_callback(uint8_t rhport, usbd_control_xfer_cb_t fp) {
+  usbd_instance_t* inst = usbd_get_instance(rhport);
+  if (inst) {
+    inst->ctrl_xfer.complete_cb = fp;
+  }
 }
 
 // for dcd_set_address where DCD is responsible for status response
-void usbd_control_set_request(const tusb_control_request_t* request) {
-  _ctrl_xfer.request = (*request);
-  _ctrl_xfer.buffer = NULL;
-  _ctrl_xfer.total_xferred = 0;
-  _ctrl_xfer.data_len = 0;
+void usbd_control_set_request(uint8_t rhport, const tusb_control_request_t* request) {
+  usbd_instance_t* inst = usbd_get_instance(rhport);
+  if (inst) {
+    inst->ctrl_xfer.request = (*request);
+    inst->ctrl_xfer.buffer = NULL;
+    inst->ctrl_xfer.total_xferred = 0;
+    inst->ctrl_xfer.data_len = 0;
+  }
 }
 
 // callback when a transaction complete on
@@ -152,49 +156,53 @@ void usbd_control_set_request(const tusb_control_request_t* request) {
 bool usbd_control_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes) {
   (void) result;
 
+  usbd_instance_t* inst = usbd_get_instance(rhport);
+  TU_ASSERT(inst);
+
+  usbd_control_xfer_t* xfer = &inst->ctrl_xfer;
+
   // Endpoint Address is opposite to direction bit, this is Status Stage complete event
-  if (tu_edpt_dir(ep_addr) != _ctrl_xfer.request.bmRequestType_bit.direction) {
+  if (tu_edpt_dir(ep_addr) != xfer->request.bmRequestType_bit.direction) {
     TU_ASSERT(0 == xferred_bytes);
 
     // invoke optional dcd hook if available
-    dcd_edpt0_status_complete(rhport, &_ctrl_xfer.request);
+    dcd_edpt0_status_complete(rhport, &xfer->request);
 
-    if (NULL != _ctrl_xfer.complete_cb) {
+    if (NULL != xfer->complete_cb) {
       // TODO refactor with usbd_driver_print_control_complete_name
-      _ctrl_xfer.complete_cb(rhport, CONTROL_STAGE_ACK, &_ctrl_xfer.request);
+      xfer->complete_cb(rhport, CONTROL_STAGE_ACK, &xfer->request);
     }
 
     return true;
   }
 
-  if (_ctrl_xfer.request.bmRequestType_bit.direction == TUSB_DIR_OUT) {
-    TU_VERIFY(_ctrl_xfer.buffer);
-    memcpy(_ctrl_xfer.buffer, _ctrl_epbuf.buf, xferred_bytes);
-    TU_LOG_MEM(CFG_TUD_LOG_LEVEL, _ctrl_xfer.buffer, xferred_bytes, 2);
+  if (xfer->request.bmRequestType_bit.direction == TUSB_DIR_OUT) {
+    TU_VERIFY(xfer->buffer);
+    memcpy(xfer->buffer, inst->ctrl_epbuf.buf, xferred_bytes);
+    TU_LOG_MEM(CFG_TUD_LOG_LEVEL, xfer->buffer, xferred_bytes, 2);
   }
 
-  _ctrl_xfer.total_xferred += (uint16_t) xferred_bytes;
-  _ctrl_xfer.buffer += xferred_bytes;
+  xfer->total_xferred += (uint16_t) xferred_bytes;
+  xfer->buffer += xferred_bytes;
 
   // Data Stage is complete when all request's length are transferred or
   // a short packet is sent including zero-length packet.
-  if ((_ctrl_xfer.request.wLength == _ctrl_xfer.total_xferred) ||
+  if ((xfer->request.wLength == xfer->total_xferred) ||
       (xferred_bytes < CFG_TUD_ENDPOINT0_BUFSIZE)) {
     // DATA stage is complete
     bool is_ok = true;
 
     // invoke complete callback if set
-    // callback can still stall control in status phase e.g out data does not make sense
-    if (NULL != _ctrl_xfer.complete_cb) {
+    if (NULL != xfer->complete_cb) {
       #if CFG_TUSB_DEBUG >= CFG_TUD_LOG_LEVEL
-      usbd_driver_print_control_complete_name(_ctrl_xfer.complete_cb);
+      usbd_driver_print_control_complete_name(xfer->complete_cb);
       #endif
 
-      is_ok = _ctrl_xfer.complete_cb(rhport, CONTROL_STAGE_DATA, &_ctrl_xfer.request);
+      is_ok = xfer->complete_cb(rhport, CONTROL_STAGE_DATA, &xfer->request);
     }
 
     if (is_ok) {
-      TU_ASSERT(status_stage_xact(rhport, &_ctrl_xfer.request));
+      TU_ASSERT(status_stage_xact(rhport, &xfer->request));
     } else {
       // Stall both IN and OUT control endpoint
       dcd_edpt_stall(rhport, EDPT_CTRL_OUT);

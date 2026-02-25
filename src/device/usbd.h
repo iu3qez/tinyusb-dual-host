@@ -58,6 +58,10 @@ bool tud_deinit(uint8_t rhport);
 // Check if device stack is already initialized
 bool tud_inited(void);
 
+// Get the rhport currently being processed by descriptor callbacks
+// Use this in tud_descriptor_*_cb() to serve different descriptors per rhport
+uint8_t tud_get_current_rhport(void);
+
 // Task function should be called in main/rtos loop, extended version of tud_task()
 // - timeout_ms: millisecond to wait, zero = no wait, 0xFFFFFFFF = wait forever
 // - in_isr: if function is called in ISR

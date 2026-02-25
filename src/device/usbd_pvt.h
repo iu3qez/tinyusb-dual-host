@@ -45,6 +45,80 @@ typedef enum {
   SOF_CONSUMER_AUDIO,
 } sof_consumer_t;
 
+// Forward declaration needed by instance struct
+typedef bool (*usbd_control_xfer_cb_t)(uint8_t rhport, uint8_t stage, tusb_control_request_t const * request);
+
+//--------------------------------------------------------------------+
+// Device Instance (for multi-rhport support)
+//--------------------------------------------------------------------+
+
+// Invalid driver ID in itf2drv[] ep2drv[][] mapping
+enum { USBD_DRVID_INVALID = 0xFFu };
+
+typedef struct {
+  struct TU_ATTR_PACKED {
+    volatile uint8_t connected    : 1;
+    volatile uint8_t addressed    : 1;
+    volatile uint8_t suspended    : 1;
+
+    uint8_t remote_wakeup_en      : 1; // enable/disable by host
+    uint8_t remote_wakeup_support : 1; // configuration descriptor's attribute
+    uint8_t self_powered          : 1; // configuration descriptor's attribute
+  };
+  volatile uint8_t cfg_num; // current active configuration (0x00 is not configured)
+  uint8_t speed;
+  volatile uint8_t sof_consumer;
+
+  uint8_t itf2drv[CFG_TUD_INTERFACE_MAX];   // map interface number to driver (0xff is invalid)
+  uint8_t ep2drv[CFG_TUD_ENDPPOINT_MAX][2]; // map endpoint to driver ( 0xff is invalid )
+
+  tu_edpt_state_t ep_status[CFG_TUD_ENDPPOINT_MAX][2];
+} usbd_device_t;
+
+// Control transfer state (from usbd_control.c)
+typedef struct {
+  tusb_control_request_t request;
+  uint8_t* buffer;
+  uint16_t data_len;
+  uint16_t total_xferred;
+  usbd_control_xfer_cb_t complete_cb;
+} usbd_control_xfer_t;
+
+// USB Device Instance Structure (mirrors usbh_instance_t pattern)
+struct usbd_instance {
+  uint8_t rhport;
+  usbd_device_t dev;
+  volatile uint8_t queued_setup;
+
+  // Control transfer state
+  usbd_control_xfer_t ctrl_xfer;
+  CFG_TUD_MEM_SECTION struct {
+    TUD_EPBUF_DEF(buf, CFG_TUD_ENDPOINT0_BUFSIZE);
+  } ctrl_epbuf;
+
+  // Event queue and spinlock are defined at file scope (not embedded in struct)
+  // Instance stores only pointers/references to them
+  osal_queue_t event_queue;
+  osal_spinlock_t* spin;
+
+#if OSAL_MUTEX_REQUIRED
+  osal_mutex_def_t mutex_def;
+  osal_mutex_t mutex;
+#else
+  #define _usbd_inst_mutex(inst) NULL
+#endif
+
+  bool initialized;
+};
+
+typedef struct usbd_instance usbd_instance_t;
+
+// Get instance from rhport
+usbd_instance_t* usbd_get_instance(uint8_t rhport);
+
+// Get the rhport currently being processed for descriptor callbacks
+uint8_t tud_get_current_rhport(void);
+
 //--------------------------------------------------------------------+
 // Class Driver API
 //--------------------------------------------------------------------+
@@ -65,8 +139,6 @@ typedef struct {
 // Can be implemented by application to extend/overwrite class driver support.
 // Note: The drivers array must be accessible at all time when stack is active
 usbd_class_driver_t const* usbd_app_driver_get_cb(uint8_t* driver_count);
-
-typedef bool (*usbd_control_xfer_cb_t)(uint8_t rhport, uint8_t stage, tusb_control_request_t const * request);
 
 void usbd_int_set(bool enabled);
 void usbd_spin_lock(bool in_isr);
