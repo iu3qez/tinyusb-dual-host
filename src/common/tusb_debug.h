@@ -27,6 +27,8 @@
 #ifndef TUSB_DEBUG_H_
 #define TUSB_DEBUG_H_
 
+#include <stdio.h>
+
 #ifdef __cplusplus
  extern "C" {
 #endif

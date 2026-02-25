@@ -187,7 +187,7 @@ static void dma_setup_prepare(uint8_t rhport) {
 */
 
 TU_ATTR_ALWAYS_INLINE static inline uint16_t calc_device_grxfsiz(uint16_t largest_ep_size, uint8_t ep_count) {
-  return 13 + 1 + 2 * ((largest_ep_size / 4) + 1) + 2 * ep_count;
+  return 13 + 1 + 1 * ((largest_ep_size / 4) + 1) + 2 * ep_count;
 }
 
 static bool dfifo_alloc(uint8_t rhport, uint8_t ep_addr, uint16_t packet_size) {
@@ -617,7 +617,7 @@ void dcd_edpt_close_all(uint8_t rhport) {
       if (edpt_is_enabled(dep)) {
         dep->ctl |= EPCTL_SNAK | EPCTL_EPDIS;
       }
-      xfer_status[n][1-d].max_size = 0;
+      xfer_status[rhport][n][1-d].max_size = 0;
     }
   }
 
@@ -788,8 +788,8 @@ static void handle_bus_reset(uint8_t rhport) {
   dwc2->epin[0].ctl |= mps << DIEPCTL0_MPSIZ_Pos;
   dwc2->epout[0].ctl |= mps << DOEPCTL0_MPSIZ_Pos;
 
-  xfer_status[0][TUSB_DIR_OUT].max_size = CFG_TUD_ENDPOINT0_SIZE;
-  xfer_status[0][TUSB_DIR_IN].max_size = CFG_TUD_ENDPOINT0_SIZE;
+  xfer_status[rhport][0][TUSB_DIR_OUT].max_size = CFG_TUD_ENDPOINT0_SIZE;
+  xfer_status[rhport][0][TUSB_DIR_IN].max_size = CFG_TUD_ENDPOINT0_SIZE;
 
   if(dma_device_enabled(dwc2)) {
     dma_setup_prepare(rhport);

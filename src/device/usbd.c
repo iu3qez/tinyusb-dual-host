@@ -134,8 +134,8 @@ static uint8_t _current_processing_rhport = 0;
 // buffers and cannot be embedded in structs
 //--------------------------------------------------------------------+
 
-// Interrupt control functions for each rhport
-static void usbd_int_set_0(bool enabled) {
+// Interrupt control functions for each rhport (referenced by OSAL macros)
+TU_ATTR_UNUSED static void usbd_int_set_0(bool enabled) {
   if (enabled) {
     dcd_int_enable(0);
   } else {
@@ -151,8 +151,8 @@ OSAL_SPINLOCK_DEF(_usbd_spin_0, usbd_int_set_0);
 static osal_spinlock_t* _usbd_spinlock_0 = &_usbd_spin_0;
 
 #if CFG_TUD_MAX_RHPORT >= 2
-// Interrupt control function for rhport 1
-static void usbd_int_set_1(bool enabled) {
+// Interrupt control function for rhport 1 (referenced by OSAL macros)
+TU_ATTR_UNUSED static void usbd_int_set_1(bool enabled) {
   if (enabled) {
     dcd_int_enable(1);
   } else {

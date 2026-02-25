@@ -92,7 +92,10 @@ struct usbd_instance {
 
   // Control transfer state
   usbd_control_xfer_t ctrl_xfer;
-  CFG_TUD_MEM_SECTION struct {
+  // Note: CFG_TUD_MEM_SECTION cannot be used on struct members (section attribute)
+  // The alignment from TUD_EPBUF_DEF is sufficient; actual section placement
+  // is handled by the file-scope instance array declaration in usbd.c
+  struct {
     TUD_EPBUF_DEF(buf, CFG_TUD_ENDPOINT0_BUFSIZE);
   } ctrl_epbuf;
 
