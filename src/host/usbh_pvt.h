@@ -133,6 +133,7 @@ struct usbh_instance {
   uint8_t rhport;
   uint8_t controller_id;
   uint8_t enumerating_daddr;
+  uint8_t enum_retry_count;
   uint8_t attach_debouncing_bm;
   tuh_bus_info_t dev0_bus;
   usbh_ctrl_xfer_info_t ctrl_xfer;

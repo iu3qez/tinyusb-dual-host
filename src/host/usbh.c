@@ -307,9 +307,15 @@ static inline usbh_device_t* get_device_from_instance(usbh_instance_t* inst, uin
 
 // Get instance from device address (searches all instances)
 static inline usbh_instance_t* get_instance_from_daddr(uint8_t daddr) {
-  // For daddr 0, use default instance
+  // For daddr 0 (during enumeration), find the instance currently enumerating
   if (daddr == 0) {
-    return (usbh_instance_t*)_default_instance;
+    for (uint8_t rh = 0; rh < CFG_TUH_MAX_RHPORT; rh++) {
+      if (_usbh_instances[rh].initialized && _usbh_instances[rh].enumerating_daddr == 0) {
+        return &_usbh_instances[rh];
+      }
+    }
+    // No instance is enumerating daddr=0 — return NULL (callers must handle)
+    return NULL;
   }
 
   // Search all instances for this device
@@ -333,10 +339,11 @@ static void process_removed_device(uint8_t rhport, uint8_t hub_addr, uint8_t hub
 static bool usbh_edpt_control_open(uint8_t dev_addr, uint8_t max_packet_size);
 static bool usbh_control_xfer_cb (uint8_t daddr, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes);
 
-// Legacy get_device - uses default instance for backward compatibility
+// Get device by address - searches all instances
 TU_ATTR_ALWAYS_INLINE static inline usbh_device_t* get_device(uint8_t dev_addr) {
-  if (_default_instance == NULL) return NULL;
-  return get_device_from_instance((usbh_instance_t*)_default_instance, dev_addr);
+  usbh_instance_t* inst = get_instance_from_daddr(dev_addr);
+  if (inst == NULL) return NULL;
+  return get_device_from_instance(inst, dev_addr);
 }
 
 TU_ATTR_ALWAYS_INLINE static inline bool is_hub_addr(uint8_t daddr) {
@@ -369,18 +376,14 @@ TU_ATTR_ALWAYS_INLINE static inline void _control_set_xfer_stage_inst(usbh_insta
   }
 }
 
-// Legacy wrapper using default instance
-TU_ATTR_ALWAYS_INLINE static inline void _control_set_xfer_stage(uint8_t stage) {
-  if (_default_instance != NULL) {
-    _control_set_xfer_stage_inst((usbh_instance_t*)_default_instance, stage);
-  }
-}
-
 TU_ATTR_ALWAYS_INLINE static inline bool usbh_setup_send(uint8_t daddr, const uint8_t setup_packet[8]) {
   const uint8_t rhport = usbh_get_rhport(daddr);
   const bool ret = hcd_setup_send(rhport, daddr, setup_packet);
   if (!ret) {
-    _control_set_xfer_stage(CONTROL_STAGE_IDLE);
+    usbh_instance_t* inst = get_instance_from_daddr(daddr);
+    if (inst != NULL) {
+      _control_set_xfer_stage_inst(inst, CONTROL_STAGE_IDLE);
+    }
   }
   return ret;
 }
@@ -413,10 +416,13 @@ bool tuh_mounted(uint8_t dev_addr) {
 
 bool tuh_connected(uint8_t daddr) {
   if (daddr == 0) {
-    // Use default instance
-    usbh_instance_t* inst = (usbh_instance_t*)_default_instance;
-    TU_VERIFY(inst != NULL, false);
-    return inst->enumerating_daddr == 0;
+    // Find instance currently enumerating daddr 0
+    for (uint8_t rh = 0; rh < CFG_TUH_MAX_RHPORT; rh++) {
+      if (_usbh_instances[rh].initialized && _usbh_instances[rh].enumerating_daddr == 0) {
+        return true;
+      }
+    }
+    return false;
   } else {
     const usbh_device_t* dev = get_device(daddr);
     TU_VERIFY(dev != NULL);
@@ -629,16 +635,26 @@ void tuh_task_instance_ext(tuh_instance_t handle, uint32_t timeout_ms, bool in_i
     TU_ASSERT(event.rhport == inst->rhport, );
 
     switch (event.event_id) {
-      case HCD_EVENT_DEVICE_ATTACH:
-        // due to the shared control buffer, we must fully complete enumerating one device first.
-        // TODO better to have an separated queue for newly attached devices
-        if (inst->enumerating_daddr == TUSB_INDEX_INVALID_8) {
-          // New device attached and we are ready
+      case HCD_EVENT_DEVICE_ATTACH: {
+        // Serialize enumeration globally across ALL controllers to prevent:
+        // - daddr=0 ambiguity (two controllers enumerating simultaneously)
+        // - TOCTOU race in enum_get_new_address (duplicate address allocation)
+        bool any_enumerating = false;
+        for (uint8_t rh = 0; rh < CFG_TUH_MAX_RHPORT; rh++) {
+          if (_usbh_instances[rh].initialized && _usbh_instances[rh].enumerating_daddr != TUSB_INDEX_INVALID_8) {
+            any_enumerating = true;
+            break;
+          }
+        }
+
+        if (!any_enumerating) {
+          // No controller is enumerating, safe to start
           TU_LOG_USBH("[%u:] USBH Device Attach\r\n", event.rhport);
           inst->enumerating_daddr = 0; // enumerate new device with address 0
+          inst->enum_retry_count = 0;
           enum_new_device(&event);
         } else {
-          // currently enumerating another device
+          // Another controller or this one is still enumerating, defer
           TU_LOG_USBH("[%u:] USBH Defer Attach until current enumeration complete\r\n", event.rhport);
           const bool is_empty = osal_queue_empty(inst->event_queue);
           queue_event(&event, in_isr);
@@ -646,7 +662,7 @@ void tuh_task_instance_ext(tuh_instance_t handle, uint32_t timeout_ms, bool in_i
             return; // Exit if this is the only event in the queue, otherwise we loop forever
           }
         }
-        break;
+        } break;
 
       case HCD_EVENT_DEVICE_REMOVE:
         TU_LOG_USBH("[%u:%u:%u] USBH DEVICE REMOVED\r\n", event.rhport, event.connection.hub_addr, event.connection.hub_port);
@@ -1219,6 +1235,9 @@ void usbh_defer_func(osal_task_func_t func, void *param, bool in_isr) {
   event.event_id = USBH_EVENT_FUNC_CALL;
   event.func_call.func = func;
   event.func_call.param = param;
+  if (_default_instance != NULL) {
+    event.rhport = ((usbh_instance_t*)_default_instance)->rhport;
+  }
   queue_event(&event, in_isr);
 }
 
@@ -1348,11 +1367,19 @@ bool tuh_bus_info_get(uint8_t daddr, tuh_bus_info_t* bus_info) {
   if (dev != NULL) {
     *bus_info = dev->bus_info;
   } else {
-    // For daddr 0 (during enumeration), get from default instance
-    if (_default_instance != NULL) {
-      usbh_instance_t* inst = (usbh_instance_t*)_default_instance;
-      *bus_info = inst->dev0_bus;
+    // daddr 0: find the instance currently enumerating
+    usbh_instance_t* inst = NULL;
+    for (uint8_t rh = 0; rh < CFG_TUH_MAX_RHPORT; rh++) {
+      if (_usbh_instances[rh].initialized && _usbh_instances[rh].enumerating_daddr == 0) {
+        inst = &_usbh_instances[rh];
+        break;
+      }
     }
+    if (inst == NULL && _default_instance != NULL) {
+      inst = (usbh_instance_t*)_default_instance;
+    }
+    TU_VERIFY(inst != NULL, false);
+    *bus_info = inst->dev0_bus;
   }
   return true;
 }
@@ -1759,19 +1786,19 @@ static void process_enumeration(tuh_xfer_t* xfer) {
   TU_VERIFY(inst != NULL, );
 
   // Retry a few times while enumerating since device can be unstable when starting up
-  static uint8_t failed_count = 0;
   if (XFER_RESULT_FAILED == xfer->result) {
     enum {
       ATTEMPT_COUNT_MAX = 3,
       ATTEMPT_DELAY_MS = 100
     };
 
-    // retry if not reaching max attempt
-    failed_count++;
-    bool retry = (inst->enumerating_daddr != TUSB_INDEX_INVALID_8) && (failed_count < ATTEMPT_COUNT_MAX);
+    // Use per-instance enum_retry_count (not ctrl_xfer.failed_count which gets
+    // reset to 0 by tuh_control_xfer on each retry attempt)
+    inst->enum_retry_count++;
+    bool retry = (inst->enumerating_daddr != TUSB_INDEX_INVALID_8) && (inst->enum_retry_count < ATTEMPT_COUNT_MAX);
     if (retry) {
       tusb_time_delay_ms_api(ATTEMPT_DELAY_MS); // delay a bit
-      TU_LOG_USBH("Enumeration attempt %u/%u\r\n", failed_count+1, ATTEMPT_COUNT_MAX);
+      TU_LOG_USBH("Enumeration attempt %u/%u\r\n", inst->enum_retry_count+1, ATTEMPT_COUNT_MAX);
       retry = tuh_control_xfer(xfer);
     }
 
@@ -1780,7 +1807,7 @@ static void process_enumeration(tuh_xfer_t* xfer) {
     }
     return;
   }
-  failed_count = 0;
+  inst->enum_retry_count = 0;
 
   uintptr_t const state = xfer->user_data;
   usbh_device_t* dev = get_device(daddr);
@@ -2076,7 +2103,15 @@ static uint8_t enum_get_new_address(usbh_instance_t* inst, bool is_hub) {
   }
 
   for (uint8_t idx = start; idx < end; idx++) {
-    if (0 == inst->devices[idx].connected) {
+    // Check if this address is free across ALL instances (global address space)
+    bool addr_in_use = false;
+    for (uint8_t rh = 0; rh < CFG_TUH_MAX_RHPORT; rh++) {
+      if (_usbh_instances[rh].initialized && _usbh_instances[rh].devices[idx].connected) {
+        addr_in_use = true;
+        break;
+      }
+    }
+    if (!addr_in_use) {
       return (idx + 1);
     }
   }
