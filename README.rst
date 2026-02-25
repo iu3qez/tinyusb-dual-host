@@ -1,3 +1,67 @@
+TinyUSB — Dual Host Fork
+========================
+
+This is a fork of `TinyUSB <https://github.com/hathach/tinyusb>`_ that adds **dual USB host controller support**,
+enabling two USB OTG controllers to operate as hosts simultaneously.
+
+The primary target is the **ESP32-P4**, which has two Synopsys DWC2 USB controllers:
+
+* **Full-Speed** controller at ``0x50040000``
+* **High-Speed** controller at ``0x50000000``
+
+Upstream TinyUSB supports only a single host controller. This fork extends the host stack to support
+multiple controllers running in parallel, each with its own device address space, event queue, and
+enumeration state.
+
+What Changed
+~~~~~~~~~~~~
+
+**HCD Layer** (``src/portable/synopsys/dwc2/hcd_dwc2.c``):
+
+* ``hcd_data_t _hcd_data`` (single global) → ``hcd_data_t _hcd_data[CFG_TUH_MAX_RHPORT]`` (per-controller array)
+* All HCD functions updated to index by ``rhport``
+
+**Host Stack** (``src/host/usbh.c``, ``usbh.h``, ``usbh_pvt.h``):
+
+* Per-controller ``usbh_instance_t`` struct with own devices, control transfer state, event queue, and spinlock
+* ``tuh_instance_init()``, ``tuh_task_instance()``, ``tuh_task_all()`` APIs for multi-controller operation
+* Global device address space — each USB address is unique across all controllers
+* Global enumeration serialization — only one controller enumerates at a time to prevent address conflicts
+* Instance-aware ``get_device()``, ``tuh_bus_info_get()``, ``usbh_setup_send()`` — all resolve the correct
+  controller from the device address
+
+**Configuration**:
+
+* Set ``CFG_TUH_MAX_RHPORT=2`` to enable dual host (defaults to 1 for single-controller backward compatibility)
+
+Usage
+~~~~~
+
+.. code-block:: c
+
+    // Initialize both controllers
+    tuh_rhport_init(0, &rh_init_fs);
+    tuh_rhport_init(1, &rh_init_hs);
+
+    // Main loop — process events for all controllers
+    while (1) {
+        tuh_task_all();
+    }
+
+Status
+~~~~~~
+
+* HCD layer: complete
+* Host stack (usbh.c): complete — dual enumeration, device management, control transfers
+* Class drivers (CDC, HID, MSC): work correctly with dual host when ``CFG_TUH_MAX_RHPORT=2``
+  (they use global arrays indexed by device address, which is now unique across controllers)
+
+----
+
+*Original README follows below.*
+
+----
+
 TinyUSB
 =======
 
