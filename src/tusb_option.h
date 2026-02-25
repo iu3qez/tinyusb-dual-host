@@ -573,6 +573,17 @@
   #define CFG_TUD_NCM         0
 #endif
 
+// Maximum number of USB root hub ports (controllers) that can operate simultaneously as devices
+// - ESP32-P4 has 2 (Full-Speed OTG1.1 and High-Speed OTG2.0)
+// - Most MCUs have 1
+#ifndef CFG_TUD_MAX_RHPORT
+  #if TU_CHECK_MCU(OPT_MCU_ESP32P4)
+    #define CFG_TUD_MAX_RHPORT 2
+  #else
+    #define CFG_TUD_MAX_RHPORT 1
+  #endif
+#endif
+
 //--------------------------------------------------------------------
 // Host Options (Default)
 //--------------------------------------------------------------------
