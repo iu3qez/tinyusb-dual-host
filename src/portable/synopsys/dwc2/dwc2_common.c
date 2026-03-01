@@ -180,11 +180,17 @@ static bool check_dwc2(dwc2_regs_t* dwc2) {
 //
 //--------------------------------------------------------------------
 bool dwc2_core_is_highspeed(dwc2_regs_t* dwc2, tusb_role_t role) {
-  (void)dwc2;
 #if CFG_TUD_ENABLED
+  // For multi-instance device mode, TUD_OPT_HIGH_SPEED is a single global
+  // compile-time constant that doesn't reflect per-rhport speed capabilities.
+  // Fall through to hardware detection instead.
+  #if CFG_TUD_MAX_RHPORT <= 1
   if (role == TUSB_ROLE_DEVICE && !TUD_OPT_HIGH_SPEED) {
     return false;
   }
+  #else
+  (void)role;
+  #endif
 #endif
 #if CFG_TUH_ENABLED
   if (role == TUSB_ROLE_HOST && !TUH_OPT_HIGH_SPEED) {
@@ -192,6 +198,7 @@ bool dwc2_core_is_highspeed(dwc2_regs_t* dwc2, tusb_role_t role) {
   }
 #endif
 
+  // Detect from hardware: ghwcfg2 tells us if this controller has an HS PHY
   const dwc2_ghwcfg2_t ghwcfg2 = {.value = dwc2->ghwcfg2};
   return ghwcfg2.hs_phy_type != GHWCFG2_HSPHY_NOT_SUPPORTED;
 }
