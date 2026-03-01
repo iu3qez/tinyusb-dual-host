@@ -731,6 +731,14 @@ bool tud_task_event_ready(void) {
 void tud_task_ext(uint32_t timeout_ms, bool in_isr) {
   (void) in_isr; // not implemented yet
 
+  // For multi-instance: use non-blocking queue receives so we round-robin
+  // all controllers instead of blocking forever on the first one's queue.
+#if CFG_TUD_MAX_RHPORT > 1
+  const uint32_t recv_timeout = 0;
+#else
+  const uint32_t recv_timeout = timeout_ms;
+#endif
+
   // Process all initialized instances
   for (uint8_t rh = 0; rh < CFG_TUD_MAX_RHPORT; rh++) {
     usbd_instance_t* inst = &_usbd_instances[rh];
@@ -739,7 +747,7 @@ void tud_task_ext(uint32_t timeout_ms, bool in_isr) {
     // Loop until there is no more events in the queue for this instance
     while (1) {
       dcd_event_t event;
-      if (!osal_queue_receive(inst->event_queue, &event, timeout_ms)) {
+      if (!osal_queue_receive(inst->event_queue, &event, recv_timeout)) {
         break; // no more events for this instance
       }
 
@@ -854,6 +862,13 @@ void tud_task_ext(uint32_t timeout_ms, bool in_isr) {
 #endif
     }
   }
+
+#if CFG_TUD_MAX_RHPORT > 1
+  // Multi-instance: we used non-blocking receives to round-robin all ports.
+  // Yield briefly to prevent busy-loop when no events are pending.
+  (void) timeout_ms;
+  osal_task_delay(1);
+#endif
 }
 
 //--------------------------------------------------------------------+
