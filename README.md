@@ -1,5 +1,5 @@
-TinyUSB — Dual Host Fork
-========================
+# TinyUSB — Dual Host Fork
+
 
 This is a fork of `TinyUSB <https://github.com/hathach/tinyusb>`_ that adds **dual USB host controller support**,
 enabling two USB OTG controllers to operate as hosts simultaneously.
@@ -13,8 +13,8 @@ Upstream TinyUSB supports only a single host controller. This fork extends the h
 multiple controllers running in parallel, each with its own device address space, event queue, and
 enumeration state.
 
-What Changed
-~~~~~~~~~~~~
+## What Changed
+
 
 **HCD Layer** (``src/portable/synopsys/dwc2/hcd_dwc2.c``):
 
@@ -34,8 +34,7 @@ What Changed
 
 * Set ``CFG_TUH_MAX_RHPORT=2`` to enable dual host (defaults to 1 for single-controller backward compatibility)
 
-Usage
-~~~~~
+## Usage
 
 .. code-block:: c
 
@@ -48,8 +47,8 @@ Usage
         tuh_task_all();
     }
 
-Status
-~~~~~~
+## Status
+
 
 * HCD layer: complete
 * Host stack (usbh.c): complete — dual enumeration, device management, control transfers
